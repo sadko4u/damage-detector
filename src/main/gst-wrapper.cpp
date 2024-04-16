@@ -29,14 +29,14 @@ struct _GstDamageDetector
 
 enum
 {
-    /* FILL ME */
+    // FILL ME
     LAST_SIGNAL
 };
 
 enum
 {
+    // FILL ME
     ARG_0
-    /* FILL ME */
 };
 
 G_DEFINE_TYPE(
@@ -130,13 +130,14 @@ static void gst_damage_detector_set_property(
     GstDamageDetector *filter = GST_DAMAGE_DETECTOR(object);
 
     GST_OBJECT_LOCK(filter);
+    lsp_finally { GST_OBJECT_UNLOCK(filter); };
+
     switch (prop_id)
     {
         default:
             G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
             break;
     }
-    GST_OBJECT_UNLOCK(filter);
 }
 
 static void gst_damage_detector_get_property(
@@ -148,13 +149,14 @@ static void gst_damage_detector_get_property(
     GstDamageDetector *filter = GST_DAMAGE_DETECTOR(object);
 
     GST_OBJECT_LOCK(filter);
+    lsp_finally { GST_OBJECT_UNLOCK(filter); };
+
     switch (prop_id)
     {
         default:
             G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
             break;
     }
-    GST_OBJECT_UNLOCK(filter);
 }
 
 static gboolean gst_damage_detector_setup(
@@ -239,7 +241,7 @@ static gboolean plugin_init(GstPlugin *plugin)
       0,
       "Audio damage detector plugin");
 
-  /* This is the name used in gst-launch-1.0 and gst_element_factory_make() */
+  // This is the name used in gst-launch-1.0 and gst_element_factory_make()
   return GST_ELEMENT_REGISTER(damage_detector, plugin);
 }
 

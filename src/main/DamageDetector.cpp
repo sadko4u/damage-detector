@@ -38,9 +38,12 @@ namespace dd
         nChannels                   = channels;
         nSampleRate                 = 44100;
         nDetectTime                 = 0;
+        nBounceTime                 = 0;
+        nEstimateTime               = 0;
         fDetectTime                 = DFL_DETECT_TIME;
-        fThreshold                  = DFL_THRESHOLD;
+        fThreshold                  = lsp::dspu::db_to_gain(DFL_THRESHOLD);
         fReactivity                 = DFL_REACTIVITY;
+        fEstimateTime               = DFL_ESTIMATE_TIME;
         bBypass                     = true;
         bUpdate                     = true;
 
@@ -60,7 +63,7 @@ namespace dd
         vChannels                   = lsp::advance_ptr_bytes<channel_t>(ptr, szof_channels);
         vBuffer                     = lsp::advance_ptr_bytes<float>(ptr, szof_buffer);
 
-        for (size_t i=0; i<channels; ++channels)
+        for (size_t i=0; i<channels; ++i)
         {
             channel_t *c                = &vChannels[i];
 
@@ -68,13 +71,18 @@ namespace dd
             c->sSC.init(1, MAX_REACTIVITY);
             c->sSC.set_mode(lsp::dspu::SCM_RMS);
             c->sSC.set_source(lsp::dspu::SCS_MIDDLE);
+            c->sSC.set_sample_rate(nSampleRate);
 
             c->sEvBuf.nHead             = 0.0f;
             c->sEvBuf.nTail             = 0.0f;
             c->sEvBuf.nCount            = 0.0f;
 
+            c->nOpenTime                = 0;
+            c->nCloseTime               = 0;
             c->nRaiseTime               = 0;
             c->nFallTime                = 0;
+            c->nEvents                  = 0;
+            c->enState                  = TRG_CLOSED;
 
             c->sEvBuf.vData             = lsp::advance_ptr_bytes<event_t>(ptr, szof_evbuf);
             c->sEvBuf.nHead             = 0;
@@ -100,12 +108,47 @@ namespace dd
             buf->vData[i].nTimestamp    = 0;
     }
 
+    size_t DamageDetector::push_event(event_buf_t *buf, timestamp_t ts)
+    {
+        // Drop last event if we don't have too much space
+        if (buf->nCount >= MAX_EVENTS)
+            buf->nTail = (buf->nTail + 1) % MAX_EVENTS;
+        else
+            ++buf->nCount;
+
+        // Push event to the buffer
+        buf->vData[buf->nHead].nTimestamp   = ts;
+        buf->nHead = (buf->nHead + 1) % MAX_EVENTS;
+
+        update_event_buf(buf, ts);
+
+        // Return actual number of events in the buffer at this moment
+        return buf->nCount;
+    }
+
+    void DamageDetector::update_event_buf(event_buf_t *buf, timestamp_t ts)
+    {
+        // Drop events that are too late relative to the current time
+        while (buf->nCount > 0)
+        {
+            const size_t ev_ts = buf->vData[buf->nTail].nTimestamp;
+            if ((ev_ts + nEstimateTime) >= ts)
+                break;
+
+            // Remove this event
+            --buf->nCount;
+            buf->nTail = (buf->nTail + 1) % MAX_EVENTS;
+        }
+    }
+
     void DamageDetector::update_settings()
     {
         if (!bUpdate)
             return;
 
-        nDetectTime = lsp::dspu::seconds_to_samples(nSampleRate, fDetectTime);
+        nDetectTime     = lsp::dspu::seconds_to_samples(nSampleRate, fDetectTime);
+        nEstimateTime   = lsp::dspu::seconds_to_samples(nSampleRate, fEstimateTime);
+        nBounceTime     = lsp::dspu::millis_to_samples(nSampleRate, fReactivity * 0.1f);
 
         for (size_t i=0; i<nChannels; ++i)
         {
@@ -135,10 +178,19 @@ namespace dd
     void DamageDetector::set_detect_time(float detect_time)
     {
         detect_time     = lsp::lsp_limit(detect_time, MIN_DETECT_TIME, MAX_DETECT_TIME);
-        if (nDetectTime == detect_time)
+        if (fDetectTime == detect_time)
             return;
-        nDetectTime     = detect_time;
-        bUpdate         = false;
+        fDetectTime     = detect_time;
+        bUpdate         = true;
+    }
+
+    void DamageDetector::set_estimation_time(float est_time)
+    {
+        est_time        = lsp::lsp_limit(est_time, MIN_ESTIMATE_TIME, MAX_ESTIMATE_TIME);
+        if (fEstimateTime == est_time)
+            return;
+        fEstimateTime   = est_time;
+        bUpdate         = true;
     }
 
     void DamageDetector::set_bypass(bool bypass)
@@ -154,16 +206,80 @@ namespace dd
 
     void DamageDetector::bind_input(size_t channel, const float *ptr)
     {
-        if (channel < nChannels)
+        if (channel >= nChannels)
             return;
         vChannels[channel].vIn      = ptr;
     }
 
     void DamageDetector::bind_output(size_t channel, float *ptr)
     {
-        if (channel < nChannels)
+        if (channel >= nChannels)
             return;
         vChannels[channel].vOut     = ptr;
+    }
+
+    void DamageDetector::generate_events(channel_t *c, size_t samples)
+    {
+        float s = 0.0f; // Current sample
+
+        for (size_t i=0; i<samples; ++i)
+        {
+            s               = vBuffer[i];
+            timestamp_t ts  = nTimestamp + i;
+
+            // Update trigger state
+            switch (c->enState)
+            {
+                case TRG_CLOSED:
+                    if (s < fThreshold)
+                        break;
+
+                    c->enState      = TRG_OPENING;
+                    c->nRaiseTime   = ts;
+                    break;
+                case TRG_OPENING:
+                    if (s < fThreshold)
+                        c->enState      = TRG_CLOSED;
+                    else if ((ts - c->nRaiseTime) > nBounceTime)
+                    {
+                        c->nOpenTime    = ts;
+                        c->enState      = TRG_OPEN;
+                    }
+                    break;
+
+                case TRG_OPEN:
+                    if (s >= fThreshold)
+                        break;
+
+                    c->enState      = TRG_CLOSING;
+                    c->nFallTime    = ts;
+                    break;
+
+                case TRG_CLOSING:
+                    if (s >= fThreshold)
+                        c->enState  = TRG_OPEN;
+                    else if ((ts - c->nFallTime) > nBounceTime)
+                    {
+                        c->nCloseTime   = ts;
+                        c->enState      = TRG_CLOSED;
+
+                        // We need to check that we have had enough time trigger was opened
+                        if (c->nFallTime < (c->nRaiseTime + nDetectTime))
+                        {
+                            const size_t events = push_event(&c->sEvBuf, ts);
+                            c->nEvents      = lsp::lsp_max(c->nEvents, events);
+                        }
+
+                        // Output the event detection signal
+                        if (!bBypass)
+                            c->vOut[i]      = 1.0f;
+                    }
+                    break;
+
+                default:
+                    break;
+            }
+        }
     }
 
     void DamageDetector::process(size_t samples)
@@ -171,42 +287,64 @@ namespace dd
         // Apply new changes if they are
         update_settings();
 
-        // Do the rest stuff
+        // Prepare data
         for (size_t i=0; i<nChannels; ++i)
         {
-            channel_t *c = &vChannels[i];
+            channel_t *c    = &vChannels[i];
+            c->nEvents      = c->sEvBuf.nCount;
+        }
 
-            // Pass data from input to output
-            for (size_t offset = 0; offset < samples; )
+        // Pass data from input to output
+        for (size_t offset = 0; offset < samples; )
+        {
+            const size_t to_do = lsp::lsp_min(samples - offset, TMP_BUFFER_SIZE);
+
+            // Process each channel
+            for (size_t i=0; i<nChannels; ++i)
             {
-                const size_t to_do = lsp::lsp_min(samples - offset, TMP_BUFFER_SIZE);
+                channel_t *c = &vChannels[i];
 
                 // Process sidechain and apply bypass
                 lsp::dsp::sanitize2(c->vOut, c->vIn, to_do);
-                c->sSC.process(vBuffer, const_cast<const float **>(&c->vIn), to_do);
+                c->sSC.process(vBuffer, const_cast<const float **>(&c->vOut), to_do);
                 if (!bBypass)
                     lsp::dsp::fill_zero(c->vOut, samples);
 
-                // TODO: main detection stuff
+                // Generate events triggered by the detector
+                generate_events(c, to_do);
 
                 // Update pointers
                 c->vIn     += to_do;
                 c->vOut    += to_do;
-                offset     += to_do;
             }
+
+            offset     += to_do;
+            nTimestamp += to_do;
+        }
+
+        // Cleanup state
+        for (size_t i=0; i<nChannels; ++i)
+        {
+            channel_t *c    = &vChannels[i];
+
+            // Remove old events from buffer
+            update_event_buf(&c->sEvBuf, nTimestamp);
+
+            c->vIn          = NULL;
+            c->vOut         = NULL;
         }
     }
 
     size_t DamageDetector::events_count(size_t channel) const
     {
-        return (channel < nChannels) ? vChannels[channel].sEvBuf.nCount : 0;
+        return (channel < nChannels) ? vChannels[channel].nEvents : 0;
     }
 
     size_t DamageDetector::events_count() const
     {
         size_t result = 0;
         for (size_t i=0; i<nChannels; ++i)
-            result     += vChannels[i].sEvBuf.nCount;
+            result     += vChannels[i].nEvents;
 
         return result;
     }

@@ -40,12 +40,24 @@ namespace dd
             static constexpr float  MAX_DETECT_TIME     = 5.0f;
             static constexpr float  DFL_DETECT_TIME     = 1.0f;
 
+            static constexpr float  MIN_ESTIMATE_TIME   = 1.0f;
+            static constexpr float  MAX_ESTIMATE_TIME   = 60.0f;
+            static constexpr float  DFL_ESTIMATE_TIME   = 10.0f;
+
             static constexpr float  MIN_THRESHOLD       = -100.0f;
             static constexpr float  MAX_THRESHOLD       = 0.0f;
             static constexpr float  DFL_THRESHOLD       = -40.0f;
 
         private:
             typedef uint64_t            timestamp_t;
+
+            enum trg_state_t
+            {
+                TRG_CLOSED,
+                TRG_OPENING,
+                TRG_OPEN,
+                TRG_CLOSING
+            };
 
             typedef struct event_t
             {
@@ -64,9 +76,12 @@ namespace dd
             {
                 lsp::dspu::Sidechain    sSC;
                 event_buf_t             sEvBuf;
+                timestamp_t             nOpenTime;
+                timestamp_t             nCloseTime;
                 timestamp_t             nRaiseTime;     // Last time the signal went above threshold
                 timestamp_t             nFallTime;      // Last time the signal went below threshold
-                float                   fRms;           // Last RMS level value
+                uint32_t                nEvents;        // Number of computed events
+                trg_state_t             enState;        // State of the trigger
 
                 const float            *vIn;            // Input buffer
                 float                  *vOut;           // Output buffer
@@ -79,9 +94,12 @@ namespace dd
             uint32_t        nChannels;      // Number of channels
             uint32_t        nSampleRate;    // Sample rate
             uint32_t        nDetectTime;    // Detection time in samples
+            uint32_t        nBounceTime;    // Raise/Fall detection time
+            uint32_t        nEstimateTime;  // Overall estimation time
             float           fDetectTime;    // Detection time in milliseconds
             float           fThreshold;     // Threshold
             float           fReactivity;    // Reactivity
+            float           fEstimateTime;  // Estimation time
             bool            bBypass;        // Bypass
             bool            bUpdate;        // Update data
 
@@ -98,6 +116,9 @@ namespace dd
 
         private:
             void            update_settings();
+            void            generate_events(channel_t *c, size_t to_do);
+            size_t          push_event(event_buf_t *buf, timestamp_t ts);
+            void            update_event_buf(event_buf_t *buf, timestamp_t ts);
 
         private:
             static void     clear_event_buf(event_buf_t *buf);
@@ -114,6 +135,12 @@ namespace dd
              * @param detect_time audio click detection time
              */
             void            set_detect_time(float detect_time);
+
+            /**
+             * Set the estimation time window for calculating number of events
+             * @param est_time estimation time window in seconds
+             */
+            void            set_estimation_time(float est_time);
 
             /**
              * Set trigger threshold

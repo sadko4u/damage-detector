@@ -91,7 +91,7 @@ static GstStaticPadTemplate sink_factory = GST_STATIC_PAD_TEMPLATE (
     GST_STATIC_CAPS(
         "audio/x-raw, "
         "format = (string) " GST_AUDIO_NE(F32) ", "
-        "channels = (int) { 2 }, "
+        "channels = (int) 2, "
         "rate = (int) [ 1, max ]"
     )
 );
@@ -103,7 +103,7 @@ static GstStaticPadTemplate source_factory = GST_STATIC_PAD_TEMPLATE (
     GST_STATIC_CAPS(
         "audio/x-raw, "
         "format = (string) " GST_AUDIO_NE(F32) ", "
-        "channels = (int) { 2 }, "
+        "channels = (int) 2, "
         "rate = (int) [ 1, max ]"
     )
 );

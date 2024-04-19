@@ -97,6 +97,7 @@ namespace dd
             uint32_t        nBounceTime;    // Raise/Fall detection time
             uint32_t        nEstimateTime;  // Overall estimation time
             float           fDetectTime;    // Detection time in milliseconds
+            float           fThresholdDB;   // Threshold (in decibels)
             float           fThreshold;     // Threshold
             float           fReactivity;    // Reactivity
             float           fEstimateTime;  // Estimation time
@@ -129,30 +130,42 @@ namespace dd
              * @param sample_rate processing sample rate
              */
             void            set_sample_rate(size_t sample_rate);
+            inline size_t   sample_rate() const { return nSampleRate; }
 
             /**
-             * Set audio click detection time
+             * Set audio click detection time in seconds
              * @param detect_time audio click detection time
              */
             void            set_detect_time(float detect_time);
+            inline float    detect_time() const { return fDetectTime; }
 
             /**
-             * Set the estimation time window for calculating number of events
+             * Set the estimation time window for calculating number of events in seconds
              * @param est_time estimation time window in seconds
              */
             void            set_estimation_time(float est_time);
+            inline float    estimation_time() const { return nEstimateTime; }
 
             /**
              * Set trigger threshold
              * @param thresh trigger threshold in decibels
              */
             void            set_threshold(float thresh);
+            inline float    threshold() const { return fThresholdDB; }
 
             /**
              * Enable/disable bypass
              * @param bypass bypass flag
              */
             void            set_bypass(bool bypass);
+            inline bool     bypass() const { return bBypass; }
+
+            /**
+             * Set the reactivity of the RMS value calculation in milliseconds
+             * @param reactivity reactivity of the RMS value calculation
+             */
+            void            set_reactivity(float reactivity);
+            inline float    reactivity() const { return fReactivity; }
 
             /**
              * Bind input buffer

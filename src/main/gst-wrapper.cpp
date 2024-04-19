@@ -7,6 +7,9 @@
 #include <lsp-plug.in/common/types.h>
 
 #include <private/version.h>
+#include <private/DamageDetector.h>
+
+static constexpr size_t IO_BUF_SIZE     = 0x400;
 
 GST_DEBUG_CATEGORY_STATIC(damage_detector_debug);
 #define GST_CAT_DEFAULT damage_detector_debug
@@ -23,23 +26,24 @@ struct _GstDamageDetector
 {
     GstAudioFilter audiofilter;
 
-    // here you can add additional per-instance data such as properties
+    dd::DamageDetector *processor;
+    float *left;
+    float *right;
 };
 
 
-enum
+enum properties_t
 {
-    // FILL ME
-    LAST_SIGNAL
+    PROP_THRESHOLD,
+    PROP_REACTIVITY,
+    PROP_DETECT_TIME,
+    PROP_ESTIMATION_TIME,
+    PROP_EVENTS
 };
 
-enum
-{
-    // FILL ME
-    ARG_0
-};
+#define gst_damage_detector_parent_class parent_class
 
-G_DEFINE_TYPE(
+G_DEFINE_TYPE( // @suppress("Unused static function")
     GstDamageDetector,
     gst_damage_detector,
     GST_TYPE_AUDIO_FILTER);
@@ -49,6 +53,10 @@ GST_ELEMENT_REGISTER_DEFINE(
     "damage_detector",
     GST_RANK_NONE,
     GST_TYPE_DAMAGE_DETECTOR);
+
+static void gst_damage_detector_init(GstDamageDetector *filter);
+
+static void gst_damage_detector_finalize(GObject * object);
 
 static void gst_damage_detector_set_property(
     GObject *object,
@@ -76,8 +84,30 @@ static GstFlowReturn gst_damage_detector_filter_inplace(
     GstBuffer * buf);
 
 // We only support 32-bit IEEE 754 floating point
-#define SUPPORTED_CAPS_STRING \
-    GST_AUDIO_CAPS_MAKE(GST_AUDIO_NE(F32))
+static GstStaticPadTemplate sink_factory = GST_STATIC_PAD_TEMPLATE (
+    "sink",
+    GST_PAD_SINK,
+    GST_PAD_ALWAYS,
+    GST_STATIC_CAPS(
+        "audio/x-raw, "
+        "format = (string) " GST_AUDIO_NE(F32) ", "
+        "channels = (int) { 2 }, "
+        "rate = (int) [ 1, max ]"
+    )
+);
+
+static GstStaticPadTemplate source_factory = GST_STATIC_PAD_TEMPLATE (
+    "src",
+    GST_PAD_SRC,
+    GST_PAD_ALWAYS,
+    GST_STATIC_CAPS(
+        "audio/x-raw, "
+        "format = (string) " GST_AUDIO_NE(F32) ", "
+        "channels = (int) { 2 }, "
+        "rate = (int) [ 1, max ]"
+    )
+);
+
 
 // GObject vmethod implementations
 static void gst_damage_detector_class_init(GstDamageDetectorClass * klass)
@@ -87,10 +117,9 @@ static void gst_damage_detector_class_init(GstDamageDetectorClass * klass)
     GstBaseTransformClass *btrans_class = reinterpret_cast<GstBaseTransformClass *>(klass);
     GstAudioFilterClass *audio_filter_class = reinterpret_cast<GstAudioFilterClass *>(klass);
 
-    GstCaps *caps;
-
     gobject_class->set_property = gst_damage_detector_set_property;
     gobject_class->get_property = gst_damage_detector_get_property;
+    gobject_class->finalize = gst_damage_detector_finalize;
 
     // this function will be called when the format is set before the
     // first buffer comes in, and whenever the format changes
@@ -109,16 +138,72 @@ static void gst_damage_detector_class_init(GstDamageDetectorClass * klass)
       "Detects damage of audio stream",
       "Vladimir Sadovnikov <sadko4u@gmail.com>");
 
-    caps = gst_caps_from_string(SUPPORTED_CAPS_STRING);
-    gst_audio_filter_class_add_pad_templates(audio_filter_class, caps);
-    gst_caps_unref (caps);
+    // Pads
+    gst_element_class_add_pad_template(
+        element_class,
+        gst_static_pad_template_get(&sink_factory));
+    gst_element_class_add_pad_template(
+        element_class,
+        gst_static_pad_template_get(&source_factory));
+
+    // Properties
+    g_object_class_install_property(
+        gobject_class, PROP_THRESHOLD,
+        g_param_spec_float(
+            "threshold", "Threshold", "Signal trigger threshold [dB]",
+            dd::DamageDetector::MIN_THRESHOLD, dd::DamageDetector::MAX_THRESHOLD, dd::DamageDetector::DFL_THRESHOLD,
+            G_PARAM_READWRITE));
+
+    g_object_class_install_property(
+        gobject_class, PROP_REACTIVITY,
+        g_param_spec_float(
+            "reactivity", "Reactivity", "Reactivity of the RMS value calculation [ms]",
+            dd::DamageDetector::MIN_REACTIVITY, dd::DamageDetector::MAX_REACTIVITY, dd::DamageDetector::DFL_REACTIVITY,
+            G_PARAM_READWRITE));
+
+    g_object_class_install_property(
+        gobject_class, PROP_DETECT_TIME,
+        g_param_spec_float(
+            "d_time", "Detection time", "Audio click detection time [s]",
+            dd::DamageDetector::MIN_DETECT_TIME, dd::DamageDetector::MAX_DETECT_TIME, dd::DamageDetector::DFL_DETECT_TIME,
+            G_PARAM_READWRITE));
+
+    g_object_class_install_property(
+        gobject_class, PROP_ESTIMATION_TIME,
+        g_param_spec_float(
+            "e_time", "Estimation time", "Estimation time window for calculating number of events [s]",
+            dd::DamageDetector::MIN_ESTIMATE_TIME, dd::DamageDetector::MAX_ESTIMATE_TIME, dd::DamageDetector::DFL_ESTIMATE_TIME,
+            G_PARAM_READWRITE));
+
+    g_object_class_install_property(
+        gobject_class, PROP_EVENTS,
+        g_param_spec_uint(
+            "events", "Events", "The number of detected stream corruption events",
+            0, dd::DamageDetector::MAX_EVENTS * 2, 0,
+            G_PARAM_READABLE));
 }
 
 static void gst_damage_detector_init(GstDamageDetector *filter)
 {
-    // This function is called when a new filter object is created. You
-    // would typically do things like initialise properties to their
-    // default values here if needed.
+    // Initialize filter and buffers
+    filter->processor   = new dd::DamageDetector(2);
+    filter->left        = new float[IO_BUF_SIZE * 2];
+    filter->right       = &filter->left[IO_BUF_SIZE];
+}
+
+static void gst_damage_detector_finalize(GObject * object)
+{
+    GstDamageDetector *filter = GST_DAMAGE_DETECTOR(object);
+
+    // Finalize filter and buffers
+    delete filter->processor;
+    delete filter->left;
+
+    filter->processor   = NULL;
+    filter->left        = NULL;
+    filter->right       = NULL;
+
+    G_OBJECT_CLASS(parent_class)->finalize(object);
 }
 
 static void gst_damage_detector_set_property(
@@ -132,8 +217,26 @@ static void gst_damage_detector_set_property(
     GST_OBJECT_LOCK(filter);
     lsp_finally { GST_OBJECT_UNLOCK(filter); };
 
+    dd::DamageDetector *p = filter->processor;
+
     switch (prop_id)
     {
+        case PROP_THRESHOLD:
+            p->set_threshold(g_value_get_float(value));
+            break;
+
+        case PROP_REACTIVITY:
+            p->set_reactivity(g_value_get_float(value));
+            break;
+
+        case PROP_DETECT_TIME:
+            p->set_detect_time(g_value_get_float(value));
+            break;
+
+        case PROP_ESTIMATION_TIME:
+            p->set_detect_time(g_value_get_float(value));
+            break;
+
         default:
             G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
             break;
@@ -151,8 +254,30 @@ static void gst_damage_detector_get_property(
     GST_OBJECT_LOCK(filter);
     lsp_finally { GST_OBJECT_UNLOCK(filter); };
 
+    dd::DamageDetector *p = filter->processor;
+
     switch (prop_id)
     {
+        case PROP_THRESHOLD:
+            g_value_set_float(value, p->threshold());
+            break;
+
+        case PROP_REACTIVITY:
+            g_value_set_float(value, p->reactivity());
+            break;
+
+        case PROP_DETECT_TIME:
+            g_value_set_float(value, p->detect_time());
+            break;
+
+        case PROP_ESTIMATION_TIME:
+            g_value_set_float(value, p->estimation_time());
+            break;
+
+        case PROP_EVENTS:
+            g_value_set_float(value, p->events_count());
+            break;
+
         default:
             G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
             break;
@@ -179,7 +304,50 @@ static gboolean gst_damage_detector_setup(
     // GST_AUDIO_FILTER_INFO(filter) so it's automatically available
     // later from there as well
 
-    return TRUE;
+    return GST_AUDIO_FILTER_CLASS(parent_class)->setup(object, info);
+}
+
+static GstFlowReturn gst_damage_detector_process(
+    GstDamageDetector *object,
+    void *dst, const void *src, size_t bytes)
+{
+    const size_t samples = bytes / (sizeof(float) * 2);
+
+    const float *sptr   = reinterpret_cast<const float *>(src);
+    float *dptr         = reinterpret_cast<float *>(dst);
+
+    for (size_t offset=0; offset < samples; )
+    {
+        // Determine the number of samples to process
+        const size_t to_do  = lsp::lsp_min(IO_BUF_SIZE, samples - offset);
+
+        // De-interleave data
+        for (size_t i=0; i<to_do; ++i, sptr += 2)
+        {
+            object->left[i] = sptr[0];
+            object->right[i] = sptr[1];
+        }
+
+        // Do the processing stuff
+        object->processor->bind_input(0, object->left);
+        object->processor->bind_input(1, object->right);
+        object->processor->bind_output(0, object->left);
+        object->processor->bind_output(1, object->right);
+
+        object->processor->process(to_do);
+
+        // Interleave data
+        for (size_t i=0; i<to_do; ++i, dptr += 2)
+        {
+            dptr[0] = object->left[i];
+            dptr[1] = object->right[i];
+        }
+
+        // Update the offset
+        offset             += to_do;
+    }
+
+    return GST_FLOW_OK;
 }
 
 // You may choose to implement either a copying filter or an
@@ -208,9 +376,8 @@ static GstFlowReturn gst_damage_detector_filter(
     lsp_finally { gst_buffer_unmap (outbuf, &map_out); };
 
     g_assert (map_out.size == map_in.size);
-    memcpy (map_out.data, map_in.data, map_out.size);
 
-    return GST_FLOW_OK;
+    return gst_damage_detector_process(filter, map_out.data, map_in.data, map_out.size);
 }
 
 static GstFlowReturn gst_damage_detector_filter_inplace(
@@ -228,8 +395,7 @@ static GstFlowReturn gst_damage_detector_filter_inplace(
         return GST_FLOW_OK;
     lsp_finally { gst_buffer_unmap (buf, &map); };
 
-
-    return GST_FLOW_OK;
+    return gst_damage_detector_process(filter, map.data, map.data, map.size);
 }
 
 static gboolean plugin_init(GstPlugin *plugin)

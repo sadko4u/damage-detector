@@ -41,7 +41,8 @@ namespace dd
         nBounceTime                 = 0;
         nEstimateTime               = 0;
         fDetectTime                 = DFL_DETECT_TIME;
-        fThreshold                  = lsp::dspu::db_to_gain(DFL_THRESHOLD);
+        fThresholdDB                = DFL_THRESHOLD;
+        fThreshold                  = 0.0f;
         fReactivity                 = DFL_REACTIVITY;
         fEstimateTime               = DFL_ESTIMATE_TIME;
         bBypass                     = true;
@@ -146,6 +147,7 @@ namespace dd
         if (!bUpdate)
             return;
 
+        fThreshold      = lsp::dspu::db_to_gain(fThresholdDB);
         nDetectTime     = lsp::dspu::seconds_to_samples(nSampleRate, fDetectTime);
         nEstimateTime   = lsp::dspu::seconds_to_samples(nSampleRate, fEstimateTime);
         nBounceTime     = lsp::dspu::millis_to_samples(nSampleRate, fReactivity * 0.1f);
@@ -201,7 +203,11 @@ namespace dd
     void DamageDetector::set_threshold(float thresh)
     {
         thresh          = lsp::lsp_limit(thresh, MIN_THRESHOLD, MAX_THRESHOLD);
-        fThreshold      = lsp::dspu::db_to_gain(thresh);
+        if (fThresholdDB == thresh)
+            return;
+
+        fThresholdDB    = thresh;
+        bUpdate         = true;
     }
 
     void DamageDetector::bind_input(size_t channel, const float *ptr)

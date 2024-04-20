@@ -21,6 +21,6 @@
 # Package version
 ARTIFACT_ID                 = DAMAGE_DETECTOR
 ARTIFACT_NAME               = damage-detector
-ARTIFACT_DESC               = damage-detector - a GStreamer plugin for detecting audio corruptions
+ARTIFACT_DESC               = Damage Detector - a GStreamer plugin for detecting audio stream corruptions
 ARTIFACT_VERSION            = 1.0.0-devel
 

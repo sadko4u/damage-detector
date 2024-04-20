@@ -41,6 +41,9 @@ else
   override HOST                    =
 endif
 
+GSTREAMER_PREFIX		= gst
+GSTREAMER_INSTDIR       = $(LIBDIR)/gstreamer-1.0
+
 ARTIFACT_NAME           = $($(ARTIFACT_ID)_NAME)
 ARTIFACT_VERSION        = $($(ARTIFACT_ID)_VERSION)
 ARTIFACT_DEPENDENCIES   = $(addprefix $(HOST),$(DEPENDENCIES))
@@ -52,8 +55,8 @@ ARTIFACT_OBJ_TEST       = $($(HOST)$(ARTIFACT_ID)_OBJ_TEST)
 ARTIFACT_MFLAGS         = $($(HOST)$(ARTIFACT_ID)_MFLAGS) $(foreach dep,$(DEPENDENCIES),-DUSE_$(dep))
 
 ARTIFACT_TEST_BIN       = $(ARTIFACT_BIN)/$(ARTIFACT_NAME)-test$(EXECUTABLE_EXT)
-ARTIFACT_LIB            = $(ARTIFACT_BIN)/$(LIBRARY_PREFIX)$(ARTIFACT_NAME)-$(ARTIFACT_VERSION)$(LIBRARY_EXT)
-ARTIFACT_SLIB           = $(ARTIFACT_BIN)/$(LIBRARY_PREFIX)$(ARTIFACT_NAME)-$(ARTIFACT_VERSION)$(STATICLIB_EXT)
+ARTIFACT_LIB            = $(ARTIFACT_BIN)/$(LIBRARY_PREFIX)$(GSTREAMER_PREFIX)$(ARTIFACT_NAME)-$(ARTIFACT_VERSION)$(LIBRARY_EXT)
+ARTIFACT_SLIB           = $(ARTIFACT_BIN)/$(LIBRARY_PREFIX)$(GSTREAMER_PREFIX)$(ARTIFACT_NAME)-$(ARTIFACT_VERSION)$(STATICLIB_EXT)
 ARTIFACT_LIBLINK        = $(LIBRARY_PREFIX)$(ARTIFACT_NAME)$(LIBRARY_EXT)
 ARTIFACT_SLIBLINK       = $(LIBRARY_PREFIX)$(ARTIFACT_NAME)$(STATICLIB_EXT)
 ARTIFACT_PC             = $(ARTIFACT_BIN)/$(ARTIFACT_NAME)$(PKGCONFIG_EXT)
@@ -148,25 +151,27 @@ $(ARTIFACT_PC):
 	echo "prefix=$(PREFIX)" > "$(ARTIFACT_PC)"
 	echo "exec_prefix=$(BINDIR)" >> "$(ARTIFACT_PC)"
 	echo "includedir=$(INCDIR)" >> "$(ARTIFACT_PC)"
-	echo "libdir=$(LIBDIR)" >> "$(ARTIFACT_PC)"
+	echo "libdir=$(GSTREAMER_INSTDIR)" >> "$(ARTIFACT_PC)"
 	echo "" >> $(ARTIFACT_PC) >> "$(ARTIFACT_PC)"
 	echo "Name: $($(ARTIFACT_ID)_NAME)" >> "$(ARTIFACT_PC)"
 	echo "Description: $($(ARTIFACT_ID)_DESC)" >> "$(ARTIFACT_PC)"
 	echo "Version: $($(ARTIFACT_ID)_VERSION)" >> "$(ARTIFACT_PC)"
 	echo "Cflags: -I\$${includedir}" >> "$(ARTIFACT_PC)"
-	echo "Libs: -L\$${libdir} -l$(notdir $($(ARTIFACT_ID)_NAME))" >> "$(ARTIFACT_PC)"
+	echo "Libs: -L\$${libdir} -l$(GSTREAMER_PREFIX)$(notdir $($(ARTIFACT_ID)_NAME))" >> "$(ARTIFACT_PC)"
 
 # Installation/deinstallation
 install: all
 	echo "Installing $($(ARTIFACT_ID)_NAME)"
 	mkdir -p "$(DESTDIR)$(LIBDIR)/pkgconfig"
-	$(if $(filter $(INSTALL_HEADERS),1), mkdir -p "$(DESTDIR)$(INCDIR)")
-	$(if $(filter $(INSTALL_HEADERS),1), cp -r "$(CXX_HDR_PATHS)" "$(DESTDIR)$(INCDIR)/")
+	mkdir -p "$(DESTDIR)$(GSTREAMER_INSTDIR)"
+	$(if $(CXX_HDR_PATHS),\
+	  $(if $(filter $(INSTALL_HEADERS),1), mkdir -p "$(DESTDIR)$(INCDIR)");\
+	  $(if $(filter $(INSTALL_HEADERS),1), cp -r "$(CXX_HDR_PATHS)" "$(DESTDIR)$(INCDIR)/"))
 	cp $(ARTIFACT_PC) "$(DESTDIR)$(LIBDIR)/pkgconfig/"
-	$(INSTALL) $(ARTIFACT_LIB) "$(DESTDIR)$(LIBDIR)/"
-	cp $(ARTIFACT_SLIB) "$(DESTDIR)$(LIBDIR)/"
-	ln -sf $(notdir $(ARTIFACT_LIB)) "$(DESTDIR)$(LIBDIR)/$(ARTIFACT_LIBLINK)"
-	ln -sf $(notdir $(ARTIFACT_SLIB)) "$(DESTDIR)$(LIBDIR)/$(ARTIFACT_SLIBLINK)"
+	$(INSTALL) $(ARTIFACT_LIB) "$(DESTDIR)$(GSTREAMER_INSTDIR)/"
+	cp $(ARTIFACT_SLIB) "$(DESTDIR)$(GSTREAMER_INSTDIR)/"
+	ln -sf $(notdir $(ARTIFACT_LIB)) "$(DESTDIR)$(GSTREAMER_INSTDIR)/$(ARTIFACT_LIBLINK)"
+	ln -sf $(notdir $(ARTIFACT_SLIB)) "$(DESTDIR)$(GSTREAMER_INSTDIR)/$(ARTIFACT_SLIBLINK)"
 	echo "Install OK"
 
 uninstall:

@@ -27,6 +27,13 @@
 
 namespace dd
 {
+    enum event_type_t
+    {
+        EVENT_NONE,     // No event
+        EVENT_ABOVE,    // The number of stream corruptions is above the threshold
+        EVENT_BELOW     // The number of stream corruptions is below the threshold
+    };
+
     class DamageDetector
     {
         public:
@@ -47,6 +54,12 @@ namespace dd
             static constexpr float  MIN_THRESHOLD       = -100.0f;
             static constexpr float  MAX_THRESHOLD       = 0.0f;
             static constexpr float  DFL_THRESHOLD       = -40.0f;
+
+            static constexpr float  MIN_EV_PERIOD       = 0.01f;
+            static constexpr float  MAX_EV_PERIOD       = 60.0f;
+            static constexpr float  DFL_EV_PERIOD       = 1.0f;
+
+            static constexpr size_t DFL_EV_TRHESHOLD    = 10;
 
         private:
             typedef uint64_t            timestamp_t;
@@ -91,16 +104,22 @@ namespace dd
             channel_t      *vChannels;      // Audio channels
             float          *vBuffer;        // Temporary buffer for processing
             timestamp_t     nTimestamp;     // Audio processing timestamp
+            timestamp_t     nLastNotify;    // Last notification time
             uint32_t        nChannels;      // Number of channels
             uint32_t        nSampleRate;    // Sample rate
             uint32_t        nDetectTime;    // Detection time in samples
             uint32_t        nBounceTime;    // Raise/Fall detection time
             uint32_t        nEstimateTime;  // Overall estimation time
+            uint32_t        nEventPeriod;   // Event period
+            uint32_t        nEventThreshold;// Event threshold
             float           fDetectTime;    // Detection time in milliseconds
             float           fThresholdDB;   // Threshold (in decibels)
             float           fThreshold;     // Threshold
             float           fReactivity;    // Reactivity
             float           fEstimateTime;  // Estimation time
+            float           fEventPeriod;   // Event period
+            event_type_t    enLastEvent;    // Last delivered event
+            event_type_t    enPendingEvent; // Pending event
             bool            bBypass;        // Bypass
             bool            bUpdate;        // Update data
 
@@ -166,6 +185,26 @@ namespace dd
              */
             void            set_reactivity(float reactivity);
             inline float    reactivity() const { return fReactivity; }
+
+            /**
+             * Set stream corruption event shipping period in seconds
+             * @param period period
+             */
+            void            set_event_period(float period);
+            inline float    event_period() const { return fEventPeriod; }
+
+            /**
+             * Set number of events that allow to consider the stream being corrupted
+             * @param threshold number of events that allow to consider the stream being corrupted
+             */
+            void            set_event_threshold(size_t threshold);
+            inline float    event_threshold() const { return nEventThreshold; }\
+
+            /**
+             * Poll current pending event and cleanup
+             * @return the pending event
+             */
+            event_type_t    poll_event();
 
             /**
              * Bind input buffer

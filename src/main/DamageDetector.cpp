@@ -35,16 +35,22 @@ namespace dd
         vChannels                   = NULL;
         vBuffer                     = NULL;
         nTimestamp                  = 0;
+        nLastNotify                 = 0;
         nChannels                   = channels;
         nSampleRate                 = 44100;
         nDetectTime                 = 0;
         nBounceTime                 = 0;
         nEstimateTime               = 0;
+        nEventPeriod                = 0;
+        nEventThreshold             = DFL_EV_TRHESHOLD;
         fDetectTime                 = DFL_DETECT_TIME;
         fThresholdDB                = DFL_THRESHOLD;
         fThreshold                  = 0.0f;
         fReactivity                 = DFL_REACTIVITY;
         fEstimateTime               = DFL_ESTIMATE_TIME;
+        fEventPeriod                = DFL_EV_PERIOD;
+        enLastEvent                 = EVENT_NONE;
+        enPendingEvent              = EVENT_NONE;
         bBypass                     = true;
         bUpdate                     = true;
 
@@ -151,6 +157,7 @@ namespace dd
         nDetectTime     = lsp::dspu::seconds_to_samples(nSampleRate, fDetectTime);
         nEstimateTime   = lsp::dspu::seconds_to_samples(nSampleRate, fEstimateTime);
         nBounceTime     = lsp::dspu::millis_to_samples(nSampleRate, fReactivity * 0.1f);
+        nEventPeriod    = lsp::dspu::seconds_to_samples(nSampleRate, fEventPeriod);
 
         for (size_t i=0; i<nChannels; ++i)
         {
@@ -165,7 +172,11 @@ namespace dd
             return;
 
         nTimestamp      = 0;
+        nLastNotify     = 0;
+        enLastEvent     = EVENT_NONE;
+        enPendingEvent  = EVENT_NONE;
         nSampleRate     = sample_rate;
+
         for (size_t i=0; i<nChannels; ++i)
         {
             channel_t *c                = &vChannels[i];
@@ -200,6 +211,33 @@ namespace dd
         bBypass         = bypass;
     }
 
+    void DamageDetector::set_reactivity(float reactivity)
+    {
+        reactivity      = lsp::lsp_limit(reactivity, MIN_REACTIVITY, MAX_REACTIVITY);
+        if (fReactivity == reactivity)
+            return;
+
+        fReactivity     = reactivity;
+        bUpdate         = true;
+    }
+
+    void DamageDetector::set_event_period(float period)
+    {
+        period          = lsp::lsp_limit(period, MIN_EV_PERIOD, MAX_EV_PERIOD);
+        if (fEventPeriod == period)
+            return;
+        fEventPeriod    = period;
+        bUpdate         = true;
+    }
+
+    void DamageDetector::set_event_threshold(size_t threshold)
+    {
+        if (nEventThreshold == threshold)
+            return;
+        nEventThreshold = threshold;
+        bUpdate         = true;
+    }
+
     void DamageDetector::set_threshold(float thresh)
     {
         thresh          = lsp::lsp_limit(thresh, MIN_THRESHOLD, MAX_THRESHOLD);
@@ -222,6 +260,18 @@ namespace dd
         if (channel >= nChannels)
             return;
         vChannels[channel].vOut     = ptr;
+    }
+
+    event_type_t DamageDetector::poll_event()
+    {
+        event_type_t event = enPendingEvent;
+        if (event != EVENT_NONE)
+        {
+            enLastEvent = event;
+            enPendingEvent = EVENT_NONE;
+        }
+
+        return event;
     }
 
     void DamageDetector::generate_events(channel_t *c, size_t samples)
@@ -338,6 +388,28 @@ namespace dd
 
             c->vIn          = NULL;
             c->vOut         = NULL;
+        }
+
+        // Check events and set event trigger flag
+        if (enPendingEvent == EVENT_NONE)
+        {
+            const size_t num_events = events_count();
+            if (num_events > nEventThreshold)
+            {
+                if ((enLastEvent != EVENT_ABOVE) || ((nLastNotify + nEventPeriod) <= nTimestamp))
+                {
+                    nLastNotify     = nTimestamp;
+                    enPendingEvent  = EVENT_ABOVE;
+                }
+            }
+            else
+            {
+                if (enLastEvent == EVENT_ABOVE)
+                {
+                    nLastNotify     = nTimestamp;
+                    enPendingEvent  = EVENT_BELOW;
+                }
+            }
         }
     }
 

@@ -46,6 +46,8 @@ MTEST_BEGIN("damage_detector", damage_detector)
         detector.set_bypass(false);
         detector.set_sample_rate(src->sample_rate());
         detector.set_threshold(-60.0f);
+        detector.set_event_period(2.0f);
+        detector.set_event_threshold(18);
 
         for (size_t offset=0; offset < src->length(); )
         {
@@ -58,11 +60,19 @@ MTEST_BEGIN("damage_detector", damage_detector)
 
             detector.process(to_do);
 
+            float *dptr = c_tmp.channel(0, offset);
+
             size_t events = detector.events_count();
             if (events > 0)
                 printf("offset = %d, events = %d\n", int(offset), int(events));
+            dsp::fill(dptr, events * 0.01f, to_do);
 
-            dsp::fill(c_tmp.channel(0, offset), events * 0.01f, to_do);
+            dd::event_type_t ev = detector.poll_event();
+            if (ev != dd::EVENT_NONE)
+            {
+                printf("offset = %d, event = %s\n", int(offset), (ev == dd::EVENT_ABOVE) ? "ABOVE" : "BELOW");
+                *dptr = (ev == dd::EVENT_ABOVE) ? 1.0f : -1.0f;
+            }
 
             offset     += to_do;
         }

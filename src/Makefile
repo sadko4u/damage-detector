@@ -176,10 +176,10 @@ install: all
 
 uninstall:
 	echo "Uninstalling $($(ARTIFACT_ID)_NAME)"
-	-rm -f "$(DESTDIR)$(LIBDIR)/$(notdir $(ARTIFACT_LIB))"
-	-rm -f "$(DESTDIR)$(LIBDIR)/$(notdir $(ARTIFACT_SLIB))"
-	-rm -f "$(DESTDIR)$(LIBDIR)/$(ARTIFACT_LIBLINK)"
-	-rm -f "$(DESTDIR)$(LIBDIR)/$(ARTIFACT_SLIBLINK)"
+	-rm -f "$(DESTDIR)$(GSTREAMER_INSTDIR)/$(notdir $(ARTIFACT_LIB))"
+	-rm -f "$(DESTDIR)$(GSTREAMER_INSTDIR)/$(notdir $(ARTIFACT_SLIB))"
+	-rm -f "$(DESTDIR)$(GSTREAMER_INSTDIR)/$(ARTIFACT_LIBLINK)"
+	-rm -f "$(DESTDIR)$(GSTREAMER_INSTDIR)/$(ARTIFACT_SLIBLINK)"
 	-rm -f "$(DESTDIR)$(LIBDIR)/pkgconfig/$(notdir $(ARTIFACT_PC))"
 	-rm -f $(CXX_INSTHEADERS)
 	echo "Uninstall OK"

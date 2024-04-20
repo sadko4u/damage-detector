@@ -3,6 +3,7 @@
 #include <gst/audio/gstaudiofilter.h>
 #include <string.h>
 
+#include <lsp-plug.in/common/debug.h>
 #include <lsp-plug.in/common/finally.h>
 #include <lsp-plug.in/common/types.h>
 #include <lsp-plug.in/dsp/dsp.h>
@@ -32,6 +33,8 @@ struct _GstDamageDetector
 
 enum properties_t
 {
+    PROP_STUB, // Properties should start with index 1
+
     PROP_THRESHOLD,
     PROP_REACTIVITY,
     PROP_DETECT_TIME,
@@ -150,7 +153,7 @@ static void gst_damage_detector_class_init(GstDamageDetectorClass * klass)
     g_object_class_install_property(
         gobject_class, PROP_THRESHOLD,
         g_param_spec_float(
-            "threshold", "Threshold", "Signal trigger threshold [dB]",
+            "threshold", "Threshold", "RMS signal trigger threshold [dB]",
             dd::DamageDetector::MIN_THRESHOLD, dd::DamageDetector::MAX_THRESHOLD, dd::DamageDetector::DFL_THRESHOLD,
             G_PARAM_READWRITE));
 
@@ -164,14 +167,14 @@ static void gst_damage_detector_class_init(GstDamageDetectorClass * klass)
     g_object_class_install_property(
         gobject_class, PROP_DETECT_TIME,
         g_param_spec_float(
-            "d_time", "Detection time", "Audio click detection time [s]",
+            "d_time", "Detection time", "Audio signal corruption detection time [s]",
             dd::DamageDetector::MIN_DETECT_TIME, dd::DamageDetector::MAX_DETECT_TIME, dd::DamageDetector::DFL_DETECT_TIME,
             G_PARAM_READWRITE));
 
     g_object_class_install_property(
         gobject_class, PROP_ESTIMATION_TIME,
         g_param_spec_float(
-            "e_time", "Estimation time", "Estimation time window for calculating number of events [s]",
+            "e_time", "Estimation time", "Estimation time window for calculating number of corruption events [s]",
             dd::DamageDetector::MIN_ESTIMATE_TIME, dd::DamageDetector::MAX_ESTIMATE_TIME, dd::DamageDetector::DFL_ESTIMATE_TIME,
             G_PARAM_READWRITE));
 
@@ -192,7 +195,7 @@ static void gst_damage_detector_class_init(GstDamageDetectorClass * klass)
     g_object_class_install_property(
         gobject_class, PROP_EVENTS_PERIOD,
         g_param_spec_float(
-            "ev_period", "Events period", "Event notification period [s]",
+            "ev_period", "Events period", "Notification send period [s]",
             dd::DamageDetector::MIN_EV_PERIOD, dd::DamageDetector::MAX_EV_PERIOD, dd::DamageDetector::DFL_EV_PERIOD,
             G_PARAM_READWRITE));
 }
@@ -297,7 +300,7 @@ static void gst_damage_detector_get_property(
             break;
 
         case PROP_EVENTS:
-            g_value_set_float(value, p->events_count());
+            g_value_set_uint(value, p->events_count());
             break;
 
         case PROP_EVENTS_THRESHOLD:
@@ -321,13 +324,20 @@ static gboolean gst_damage_detector_setup(
     GstDamageDetector *filter = GST_DAMAGE_DETECTOR(object);
 
     gint sample_rate = GST_AUDIO_INFO_RATE(info);
-//    gint channels = GST_AUDIO_INFO_CHANNELS(info);
-//    GstAudioFormat fmt = GST_AUDIO_INFO_FORMAT(info);
+    IF_TRACE(
+        gint channels = GST_AUDIO_INFO_CHANNELS(info);
+        GstAudioFormat fmt = GST_AUDIO_INFO_FORMAT(info);
+    );
+
+    lsp_trace("this=%p, srate=%d, channels=%d, fmt=%d",
+        object, int(sample_rate), int(channels), int(fmt));
 
     // Update sample rate
     filter->processor->set_sample_rate(sample_rate);
 
-    return GST_AUDIO_FILTER_CLASS(parent_class)->setup(object, info);
+    return (GST_AUDIO_FILTER_CLASS(parent_class)->setup) ?
+        GST_AUDIO_FILTER_CLASS(parent_class)->setup(object, info) :
+        TRUE;
 }
 
 static GstFlowReturn gst_damage_detector_process(
@@ -374,9 +384,16 @@ static GstFlowReturn gst_damage_detector_process(
         const dd::event_type_t ev = object->processor->poll_event();
         if (ev != dd::EVENT_NONE)
         {
+            const dd::timestamp_t timestamp = object->processor->timestamp();
+
+            lsp_trace("emitting message corrupted=%s, timestamp=%llu",
+                (ev == dd::EVENT_ABOVE) ? "true" : "false",
+                timestamp);
+
             GstStructure *structure = gst_structure_new(
                 "stream-corruption-state",
                 "corrupted", G_TYPE_BOOLEAN, gboolean(ev == dd::EVENT_ABOVE),
+                "timestamp", G_TYPE_UINT64, guint64(timestamp),
                 NULL);
 
             GstMessage *message = gst_message_new_element(GST_OBJECT(object), structure);
@@ -390,11 +407,6 @@ static GstFlowReturn gst_damage_detector_process(
     return GST_FLOW_OK;
 }
 
-// You may choose to implement either a copying filter or an
-// in-place filter (or both). Implementing only one will give
-// full functionality, however, implementing both will cause
-// audiofilter to use the optimal function in every situation,
-// with a minimum of memory copies.
 static GstFlowReturn gst_damage_detector_filter(
     GstBaseTransform *object,
     GstBuffer *inbuf,
@@ -402,8 +414,7 @@ static GstFlowReturn gst_damage_detector_filter(
 {
     GstDamageDetector *filter = GST_DAMAGE_DETECTOR(object);
 
-    // Do something interesting here.  We simply copy the input data
-    // to the output buffer for now.
+    // Map buffers
     GstMapInfo map_in;
     if (!gst_buffer_map (inbuf, &map_in, GST_MAP_READ))
         return GST_FLOW_OK;
@@ -416,6 +427,7 @@ static GstFlowReturn gst_damage_detector_filter(
 
     g_assert (map_out.size == map_in.size);
 
+    // Call processing
     return gst_damage_detector_process(filter, map_out.data, map_in.data, map_out.size);
 }
 
@@ -425,20 +437,21 @@ static GstFlowReturn gst_damage_detector_filter_inplace(
 {
     GstDamageDetector *filter = GST_DAMAGE_DETECTOR(object);
 
-    // Do something interesting here.  Doing nothing means the input
-    // buffer is simply pushed out as is without any modification
+    // Map buffer
     GstMapInfo map;
     if (!gst_buffer_map (buf, &map, GST_MAP_READWRITE))
         return GST_FLOW_OK;
     lsp_finally { gst_buffer_unmap (buf, &map); };
 
+    // Call processing
     return gst_damage_detector_process(filter, map.data, map.data, map.size);
 }
 
 static gboolean plugin_init(GstPlugin *plugin)
 {
-    // This is the name used in gst-launch-1.0 and gst_element_factory_make()
     lsp::dsp::init();
+    lsp::debug::redirect("gst-damage-detector.log");
+
     return GST_ELEMENT_REGISTER(damage_detector, plugin);
 }
 
@@ -446,7 +459,6 @@ static gboolean plugin_init(GstPlugin *plugin)
     #define PACKAGE     DAMAGE_DETECTOR_PACKAGE
 #endif /* PACKAGE */
 
-// gstreamer looks for this structure to register plugins
 GST_PLUGIN_DEFINE(
     GST_VERSION_MAJOR,
     GST_VERSION_MINOR,

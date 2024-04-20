@@ -34,6 +34,8 @@ namespace dd
         EVENT_BELOW     // The number of stream corruptions is below the threshold
     };
 
+    typedef uint64_t            timestamp_t;
+
     class DamageDetector
     {
         public:
@@ -62,8 +64,6 @@ namespace dd
             static constexpr size_t DFL_EV_TRHESHOLD    = 10;
 
         private:
-            typedef uint64_t            timestamp_t;
-
             enum trg_state_t
             {
                 TRG_CLOSED,
@@ -144,6 +144,12 @@ namespace dd
             static void     clear_event_buf(event_buf_t *buf);
 
         public:
+            /**
+             * Get current timestamp in samples
+             * @return current timestamp in samples
+             */
+            inline timestamp_t timestamp() const        { return nTimestamp; }
+
             /**
              * Set processing sample rate
              * @param sample_rate processing sample rate

@@ -5,17 +5,17 @@ specified period and sends notification when the number of drops exceeds the spe
 
 ## Algorithm
 
-The plugin estimates RMS of the input signal for a period defined by the 'reactivity' parameter.
+The plugin estimates RMS of the input signal for a period defined by the `reactivity` parameter.
 After that, it looks at the level of the RMS signal.
 
-At the start, the plugin is in CLOSED state. It analyzes the computed RMS value and ff the RMS level
+At the start, the plugin is in CLOSED state. It analyzes the computed RMS value and if the RMS level
 is above the specified threshold (see `threshold` parameter), it waits for 1/10 of reactivity time to
 ensure that the signal went above the threshold, and turns into OPEN state. The last timestamp when the
 plugin has turned into OPEN state is recorded. When the RMS level drops below the specified threshold,
 the plugin waits 1/10 of reacitvity time to ensure that the signal went below the threshold, and turns
 into CLOSED state. The timestamp when the plugin has turned into CLOSED state is also recorded.
 
-When the plugin turnes into CLOSED state, it computes the difference between the time of last turn into
+When the plugin turns into CLOSED state, it computes the difference between the time of last turn into
 CLOSED state and the time of last turn into OPEN state. If the difference is less than `d_time` parameter,
 it is considered to be a potential stream corruption problem, additional event is pushed into the event
 queue.
@@ -46,6 +46,7 @@ Properties available for reading:
 The plugin generates one type of the GStreamer message - `stream-corruption-state` with the following
 fields:
   * corrupted - the indicator that the plugin detected stream corruption (boolean);
+  * events - the current number of measured stream corruption events;
   * timestamp - the time stamp (in samples) relative to the start of the plugin when the corruption was detected.
 
 ## Usage

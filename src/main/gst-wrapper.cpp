@@ -393,6 +393,7 @@ static GstFlowReturn gst_damage_detector_process(
             GstStructure *structure = gst_structure_new(
                 "stream-corruption-state",
                 "corrupted", G_TYPE_BOOLEAN, gboolean(ev == dd::EVENT_ABOVE),
+                "events", G_TYPE_UINT, guint(object->processor->events_count()),
                 "timestamp", G_TYPE_UINT64, guint64(timestamp),
                 NULL);
 

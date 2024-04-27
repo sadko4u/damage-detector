@@ -24,7 +24,7 @@
 
 #define DAMAGE_DETECTOR_MAJOR           1
 #define DAMAGE_DETECTOR_MINOR           0
-#define DAMAGE_DETECTOR_MICRO           0
+#define DAMAGE_DETECTOR_MICRO           1
 
 #define DAMAGE_DETECTOR_PACKAGE         "damage-detector"
 #define DAMAGE_DETECTOR_LICENSE         "LGPL"

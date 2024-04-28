@@ -42,7 +42,11 @@ else
 endif
 
 GSTREAMER_PREFIX		= gst
-GSTREAMER_INSTDIR       = $(LIBDIR)/gstreamer-1.0
+ifeq ($(PLATFORM),Windows)
+  GSTREAMER_INSTDIR       = $(LIBDIR)/gstreamer-1.0
+else
+  GSTREAMER_INSTDIR      := $(shell pkg-config --variable=pluginsdir gstreamer-1.0)
+endif
 
 ARTIFACT_NAME           = $($(ARTIFACT_ID)_NAME)
 ARTIFACT_VERSION        = $($(ARTIFACT_ID)_VERSION)

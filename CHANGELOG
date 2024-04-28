@@ -2,6 +2,10 @@
 * RECENT CHANGES
 *******************************************************************************
 
+=== 1.0.1 ===
+
+* Added proper GStreamer plugin installation path detection.
+
 === 1.0.0 ===
 
 * Initial release.
